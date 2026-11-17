@@ -1,0 +1,18 @@
+# secretos y estado local de Hermes
+.env
+*.env
+hermes_profiles/**/.env
+hermes_profiles/**/sessions/
+hermes_profiles/**/memory/
+hermes_profiles/**/logs/
+# python
+__pycache__/
+*.pyc
+.venv/
+# resultados crudos (los CSV finales van en results/*.csv)
+results/raw/
+*.log
+
+# Banco de pruebas
+testbed/logs/*
+!testbed/logs/.gitkeep

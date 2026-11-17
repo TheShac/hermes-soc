@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: target
+    static_configs:
+      - targets: ["target:8000"]
+  - job_name: cadvisor          # opcional: solo si se levanta con --profile cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

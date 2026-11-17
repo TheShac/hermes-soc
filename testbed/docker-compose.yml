@@ -1,0 +1,100 @@
+# Banco de pruebas Hermes-SOC. Red fija 172.28.0.0/24 para conocer las IP (verdad de terreno y allowlist).
+#   target .10 | redis .11 | prometheus .20 | legit .50 | attacker1..3 .101-.103
+name: hermes-soc
+
+networks:
+  soc:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+x-attacker: &attacker
+  build: ./traffic
+  image: hermes-soc-traffic
+  profiles: ["attack"]
+  command: ["sleep", "infinity"]
+  init: true                   # PID 1 con manejo de señales: reinicio rápido
+  cap_add: [NET_ADMIN]
+  volumes:
+    - ../injectors:/injectors:ro
+  depends_on: [target]
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: soc-redis
+    networks:
+      soc: {ipv4_address: 172.28.0.11}
+
+  target:
+    build: ./target
+    image: hermes-soc-target
+    container_name: soc-target
+    cap_add: [NET_ADMIN]       # tc netem (inyector de latencia) e iptables (block_ip)
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      REDIS_HOST: redis
+      LOG_PATH: /logs/access.jsonl
+    volumes:
+      - ./logs:/logs
+    ports:
+      - "8000:8000"
+    depends_on: [redis]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      soc: {ipv4_address: 172.28.0.10}
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: soc-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      soc: {ipv4_address: 172.28.0.20}
+
+  legit:
+    build: ./traffic
+    image: hermes-soc-traffic
+    container_name: soc-legit
+    environment:
+      TARGET_URL: http://target:8000
+      RATE: "5"
+    depends_on: [target]
+    networks:
+      soc: {ipv4_address: 172.28.0.50}
+
+  attacker1:
+    <<: *attacker
+    container_name: soc-attacker1
+    networks:
+      soc: {ipv4_address: 172.28.0.101}
+  attacker2:
+    <<: *attacker
+    container_name: soc-attacker2
+    networks:
+      soc: {ipv4_address: 172.28.0.102}
+  attacker3:
+    <<: *attacker
+    container_name: soc-attacker3
+    networks:
+      soc: {ipv4_address: 172.28.0.103}
+
+  cadvisor:                    # opcional: docker compose --profile cadvisor up -d
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: soc-cadvisor
+    profiles: ["cadvisor"]
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      soc: {ipv4_address: 172.28.0.30}

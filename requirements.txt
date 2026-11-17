@@ -1,0 +1,3 @@
+# Dependencias del lado Windows (agentes, herramientas MCP, ejecutor, análisis).
+# Los contenedores del banco de pruebas tienen sus propios requirements en testbed/.
+mcp[cli]>=1.2

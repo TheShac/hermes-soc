@@ -1,0 +1,449 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage[T1]{fontenc}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds}
+\usepackage{booktabs}
+\usepackage{array}
+
+% Rotulos en espanol (sin babel, para no alterar el formato IEEE)
+\renewcommand{\tablename}{TABLA}
+\renewcommand{\figurename}{Fig.}
+
+\begin{document}
+
+\title{Hermes-SOC: Un Framework Multiagente para la Detección Diferenciada,
+Mitigación y Documentación de Fallas y Ataques Cibernéticos en Servicios y
+Microservicios}
+
+\author{\IEEEauthorblockN{Leonardo Andrés Rodríguez Lagos}
+\IEEEauthorblockA{\textit{Dep. Ingeniería Civil Informática} \\
+\textit{Universidad de Tarapacá}\\
+Arica, Chile \\
+leonardo.rodriguez.lagos@alumnos.uta.cl}
+}
+
+\maketitle
+
+\begin{abstract}
+Los servidores y arquitecturas de microservicios pueden degradarse por dos causas
+de naturaleza distinta: fallas operativas comunes o ataques cibernéticos activos.
+Diferenciar ambas causas, aplicar la contramedida correcta y documentar lo ocurrido
+son hoy tareas manuales y secuenciales. En este trabajo se presenta Hermes-SOC, un
+sistema multiagente construido sobre Hermes Agent, en el que tres agentes
+especializados se comunican mediante el protocolo Agent-to-Agent (A2A): un agente de
+Detección que clasifica el evento a partir de métricas y registros, un agente de
+Mitigación que ejecuta la contramedida correspondiente mediante herramientas MCP, y
+un agente de Documentación que genera el reporte técnico del incidente. El sistema
+fue implementado sobre un banco de pruebas en contenedores y evaluado en cuatro
+escenarios inyectados (falla de latencia, DDoS de capa de aplicación, fuerza bruta y
+operación normal) bajo dos condiciones: la cadena multiagente y un agente único que
+ejecuta las tres fases. En el piloto realizado se obtuvo una clasificación correcta
+en las ocho corridas, sin falsos positivos, y se observó que la especialización
+multiagente no redujo el tiempo de mitigación respecto del agente único.
+\end{abstract}
+
+\begin{IEEEkeywords}
+sistemas multiagente, operaciones de seguridad, respuesta a incidentes, mitigación
+de DDoS, agentes basados en modelos de lenguaje de gran escala
+\end{IEEEkeywords}
+
+\section{Contexto y Problema}
+En entornos de producción, un servicio o microservicio puede dejar de responder
+correctamente por motivos muy distintos entre sí: una falla operativa común (falta
+de memoria, un proceso caído, una dependencia externa lenta) o un ataque cibernético
+activo, siendo el más frecuente y disruptivo la denegación de servicio distribuida
+(DDoS). El tratamiento correcto de cada caso es fundamentalmente diferente: una
+falla operativa se resuelve reiniciando o escalando el recurso afectado, mientras
+que un ataque requiere contención activa (bloqueo de direcciones IP, limitación de
+tasa de peticiones, aislamiento del servicio).
+
+Actualmente este diagnóstico diferencial lo realiza un analista humano revisando
+tableros y registros, lo cual introduce demoras críticas, un problema ampliamente
+documentado en la literatura de automatización de Centros de Operaciones de
+Seguridad (SOC) mediante inteligencia artificial \cite{khayat2025}. Trabajos
+recientes han explorado marcos multiagente jerárquicos para el diagnóstico de causa
+raíz en microservicios \cite{kataria2025}, y otra línea se ha enfocado en la
+automatización del SOC mediante agentes de modelos de lenguaje \cite{srinivas2025,
+saju2026}. Sin embargo, estos enfoques abordan una sola fase por separado:
+diagnóstico de rendimiento o respuesta de seguridad, y pocos incorporan validación
+estructural o razonamiento de riesgo antes de ejecutar una acción de contención
+\cite{roy2026}. Existe entonces un vacío en sistemas que integren la clasificación
+diferencial junto con una mitigación y documentación adaptadas a esa clasificación.
+
+\section{Solución Propuesta}
+Se propone Hermes-SOC, un flujo multiagente sobre Hermes Agent compuesto por tres
+agentes especializados que se comunican mediante el protocolo A2A. El agente de
+\textbf{Detección} consume métricas y registros de acceso y determina si la anomalía
+corresponde a una falla operativa o a un ataque activo, entregando la clasificación,
+su nivel de confianza y la evidencia que la sustenta. El agente de
+\textbf{Mitigación} recibe esa clasificación y ejecuta la contramedida
+correspondiente mediante herramientas conectadas por MCP, evaluando el impacto
+operativo de cada acción antes de aplicarla \cite{roy2026}. El agente de
+\textbf{Documentación} recibe la evidencia acumulada y redacta un reporte técnico
+que responde qué se detectó, cómo se detectó, qué acción se tomó y qué se recomienda
+para prevenir la recurrencia.
+
+\begin{figure*}[t]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  font=\footnotesize,
+  agente/.style={draw, rounded corners=2pt, minimum height=9mm, minimum width=25mm,
+                 align=center, fill=blue!8},
+  tool/.style={draw, minimum height=8mm, minimum width=25mm, align=center,
+               fill=green!6},
+  infra/.style={draw, minimum height=8mm, minimum width=22mm, align=center,
+                fill=black!4},
+  flecha/.style={-{Latex[length=2mm]}, thick},
+  nota/.style={font=\scriptsize\itshape, text=black!65}
+]
+  % --- cadena A2A ---
+  \node[agente] (ej)  at (0,0)    {Ejecutor\\[-1pt]\scriptsize\texttt{runner/}};
+  \node[agente] (det) at (4.1,0)  {Detección\\[-1pt]\scriptsize:9901};
+  \node[agente] (mit) at (8.2,0)  {Mitigación\\[-1pt]\scriptsize:9902};
+  \node[agente] (doc) at (12.3,0) {Documentación\\[-1pt]\scriptsize:9903};
+  \node[align=center] (rep) at (16.0,0) {Reporte\\[-1pt]\scriptsize\texttt{report.md}};
+
+  \draw[flecha] (ej)  -- node[above, nota] {A2A}  (det);
+  \draw[flecha] (det) -- node[above, nota] {JSON} (mit);
+  \draw[flecha] (mit) -- node[above, nota] {JSON} (doc);
+  \draw[flecha] (doc) -- (rep);
+
+  % --- agente unico ---
+  \node[agente, fill=orange!12] (uni) at (0,-2.3)
+       {Agente único\\[-1pt]\scriptsize:9904};
+  \draw[flecha] (ej) -- node[right, nota] {A2A} (uni);
+
+  % --- herramientas MCP ---
+  \node[tool] (mcp1) at (4.1,-2.3)
+       {MCP lectura\\[-1pt]\scriptsize\texttt{detection\_tools}};
+  \node[tool] (mcp2) at (8.2,-2.3)
+       {MCP acciones\\[-1pt]\scriptsize\texttt{mitigation\_tools}};
+  \draw[flecha, dashed] (det) -- (mcp1);
+  \draw[flecha, dashed] (mit) -- (mcp2);
+  \draw[flecha, dashed] (uni) -- (mcp1);
+  \draw[flecha, dashed] (uni.south) -- (0,-3.65) -- (8.2,-3.65) -- (mcp2.south);
+
+  % --- banco de pruebas ---
+  \node[infra] (target) at (1.6,-5.3) {\texttt{soc-target}\\[-1pt]\scriptsize 172.28.0.10};
+  \node[infra] (redis)  at (4.5,-5.3) {\texttt{soc-redis}\\[-1pt]\scriptsize 172.28.0.11};
+  \node[infra] (prom)   at (7.6,-5.3) {\texttt{soc-prometheus}\\[-1pt]\scriptsize 172.28.0.20};
+  \node[infra] (legit)  at (10.7,-5.3) {\texttt{soc-legit}\\[-1pt]\scriptsize 5 req/s};
+  \node[infra] (atk)    at (13.8,-5.3) {\texttt{soc-attacker1..3}\\[-1pt]\scriptsize .101--.103};
+
+  \draw[flecha] (mcp1.south) -- node[pos=0.18, left, nota] {lectura} (prom.north -| mcp1);
+  \draw[flecha] (mcp2.south) -- ++(0,-1.25) -| (target.north);
+  \node[nota, anchor=west] at (8.45,-3.95) {acciones};
+  \draw[flecha] (target) -- (redis);
+
+  \begin{scope}[on background layer]
+    \node[draw, dashed, rounded corners, fit=(target)(redis)(prom)(legit)(atk),
+          inner sep=3.2mm] (bp) {};
+  \end{scope}
+  \node[nota, below=0.5mm of bp] {Banco de pruebas Docker, red 172.28.0.0/24};
+\end{tikzpicture}}
+\caption{Arquitectura de Hermes-SOC. El ejecutor transporta el resultado de cada
+agente al siguiente mediante mensajes A2A independientes; la condición de agente
+único resuelve las tres fases en un solo perfil. Las herramientas MCP de detección
+son de solo lectura y las de mitigación ejecutan acciones acotadas y auditadas sobre
+el banco de pruebas.}
+\label{fig:arq}
+\end{figure*}
+
+\section{Metodología}
+\subsection{Diseño experimental}
+Se empleó un diseño factorial de cuatro escenarios por dos condiciones. Los
+escenarios correspondieron a una falla operativa de latencia, un ataque DDoS de capa
+de aplicación, un ataque de fuerza bruta y una condición de operación normal
+destinada a medir falsos positivos. Las condiciones correspondieron a la cadena
+multiagente de tres perfiles y a un agente único que resolvió las tres fases. El
+orden de ejecución fue aleatorizado por bloques. Los resultados reportados en este
+trabajo corresponden a un piloto de una repetición por celda, es decir, ocho
+corridas válidas; por el costo de cómputo de cada corrida, entre dos y ocho minutos,
+el tamaño de muestra es reducido y los valores se interpretan como preliminares.
+
+\subsection{Banco de pruebas}
+El banco de pruebas fue desplegado sobre Docker en una red fija
+\texttt{172.28.0.0/24}, aislada del resto del equipo, y su composición se muestra en
+la Fig.~\ref{fig:arq}. El servicio objetivo fue una aplicación FastAPI que expuso
+los extremos \texttt{/}, \texttt{/health}, \texttt{/api/data} (dependiente de
+Redis), \texttt{/login} (con derivación PBKDF2, deliberadamente costosa) y
+\texttt{/metrics}. Cada petición fue registrada como una línea JSON con marca de
+tiempo, dirección IP, método, ruta, código de estado y latencia. Un contenedor
+generador de tráfico legítimo sostuvo una carga base de 5 peticiones por segundo
+durante todos los escenarios, de modo que la carga legítima estuvo siempre presente
+y permitió medir el bloqueo indebido.
+
+\subsection{Configuración experimental}
+La configuración de hardware y software utilizada se detalla en la
+Tabla~\ref{tab:setup}. Los cuatro perfiles de agente emplearon el mismo modelo, de
+modo que las diferencias observadas entre condiciones no fueran atribuibles al
+modelo. La longitud de contexto fue fijada en 64\,000 tokens porque Hermes Agent
+rechaza modelos con un contexto efectivo menor; un modelo de 8B evaluado inicialmente
+fue descartado por esta razón.
+
+\begin{table}[htbp]
+\caption{Configuración de hardware y software}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Componente} & \textbf{Detalle} \\
+\midrule
+Equipo & Intel i9-14900HX, 32 GB RAM \\
+GPU & NVIDIA RTX 5070 Laptop, 8 GB VRAM \\
+Sistema operativo & Windows con WSL2 \\
+Hermes Agent & v0.21.5+4108.g105568c (nativo) \\
+Ollama & 0.40.11 \\
+Modelo & \texttt{qwen3.5:9b} (4 perfiles) \\
+Contexto & 64\,000 tokens; 30\,\%/70\,\% CPU/GPU \\
+Variables Ollama & \texttt{FLASH\_ATTENTION=1}, \texttt{KV\_CACHE\_TYPE=q8\_0}, \\
+ & \texttt{NUM\_PARALLEL=1}, \texttt{KEEP\_ALIVE=-1} \\
+Contenedores & Docker Desktop (WSL2), red 172.28.0.0/24 \\
+Python & 3.14; \texttt{mcp} 2.3.0 \\
+Puertos A2A & 9901--9904 \\
+\bottomrule
+\end{tabular}
+\label{tab:setup}
+\end{center}
+\end{table}
+
+\subsection{Inyección de escenarios}
+Cada escenario fue inyectado por un módulo que registró su etiqueta real y sus
+parámetros en un archivo \texttt{ground\_truth.json}, el cual constituyó la verdad
+de referencia contra la que se evaluó la clasificación. La falla de latencia fue
+introducida con \texttt{tc netem} dentro del contenedor objetivo. El DDoS fue
+generado desde tres contenedores atacantes con 100 conexiones concurrentes por
+origen. La fuerza bruta fue generada desde un único origen contra el extremo de
+autenticación. Las firmas observadas para cada escenario, medidas en ventanas de
+30 s, se resumen en la Tabla~\ref{tab:firmas}. Las fallas persistieron hasta ser
+corregidas; los ataques tuvieron duración acotada.
+
+\begin{table}[htbp]
+\caption{Firmas observadas por escenario (ventana de 30 s)}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}lrrr>{\raggedright\arraybackslash}p{1.75cm}@{}}
+\toprule
+\textbf{Escenario} & \textbf{Tasa} & \textbf{IP} & \textbf{p95} & \textbf{Señal} \\
+ & \textbf{(req/s)} & \textbf{únicas} & \textbf{(ms)} & \textbf{distintiva} \\
+\midrule
+Base          & 5    & 1 & 0.6     & --- \\
+Latencia      & 5    & 1 & 813     & sin cambio de carga \\
+Memoria       & 5    & 1 & 11      & memoria 0.89 \\
+Redis caído   & 5    & 1 & 15\,000 & 16\,\% de 5xx \\
+DDoS          & 1145 & 4 & 243     & 3 IP, $\approx$33\,\% c/u \\
+Fuerza bruta  & 80   & 2 & ---     & 99.7\,\% de 401 \\
+\bottomrule
+\end{tabular}
+\label{tab:firmas}
+\end{center}
+\end{table}
+
+\subsection{Herramientas y salvaguardas}
+El agente de Detección dispuso únicamente de herramientas de solo lectura, que
+entregaron resúmenes agregados de tráfico, estado de contenedores y muestras de
+registro, en lugar de registros crudos. El agente de Mitigación dispuso de un
+conjunto acotado de acciones: reinicio de servicio, bloqueo de dirección IP,
+limitación de tasa, listado de reglas de cortafuegos y verificación de recuperación.
+Se implementaron tres salvaguardas: una lista de direcciones protegidas que no
+pueden ser bloqueadas, la restricción del reinicio a los dos contenedores del banco
+de pruebas, y el registro de toda acción ejecutada en una bitácora de auditoría
+independiente de lo que el agente declara haber hecho. Esta última salvaguarda
+permitió medir la discrepancia entre acciones declaradas y ejecutadas, una
+precaución recomendada para agentes con capacidad de ejecución \cite{hu2026,
+debenedetti2026}.
+
+\subsection{Procedimiento experimental}
+Cada corrida siguió un procedimiento fijo de cinco fases. En la primera fase el
+banco de pruebas fue restablecido a su estado base y verificado mediante una rutina
+de comprobación que valida la disponibilidad del servicio, de Redis, de Prometheus y
+de las utilidades de inyección dentro del contenedor. En la segunda fase se inyectó
+el escenario correspondiente y se registró su etiqueta real. Posteriormente, en la
+tercera fase, el ejecutor invocó la cadena multiagente o el agente único según la
+condición asignada. Durante la cuarta fase un monitor independiente consultó el
+estado del servicio cada 5 s hasta constatar la recuperación o agotar la ventana de
+observación. Finalmente, en la quinta fase se consolidaron la traza de la corrida,
+el reporte generado y la fila de métricas correspondiente. El ejecutor fue diseñado
+para ser reanudable, de modo que una interrupción no invalida las corridas previas.
+
+\subsection{Reproducibilidad}
+El código del banco de pruebas, de los agentes, de las herramientas MCP, del
+ejecutor y del análisis fue versionado en un repositorio junto con el archivo de
+dependencias y la definición de los contenedores, de manera que el entorno puede ser
+reconstruido sin intervención manual. Los perfiles de los agentes, sus instrucciones
+y los parámetros del modelo se encuentran documentados en el repositorio, al igual
+que la rutina de verificación del banco de pruebas. Las trazas crudas de cada
+corrida fueron conservadas, por lo que las métricas reportadas pueden ser
+recalculadas a partir de ellas.
+% Si el repositorio queda publico, agregar aqui la URL:
+% \footnote{Disponible en \texttt{https://github.com/<usuario>/hermes-soc}.}
+
+\subsection{Métricas e instrumentación}
+Se registraron las siguientes métricas por corrida. El acierto de clase y de
+subtipo fueron determinados comparando la salida del agente de Detección contra la
+verdad de referencia. El tiempo hasta la detección fue medido solo en la condición
+multiagente, donde existe un salto de Detección observable. El tiempo hasta la
+primera acción y el tiempo hasta la recuperación (MTTR) fueron medidos en ambas
+condiciones por un monitor independiente que consultó el estado del servicio cada
+5 s, de modo que la recuperación fue verificada contra el servicio y no contra lo
+declarado por los agentes. Se contabilizaron además las acciones ejecutadas, las
+acciones sobre direcciones IP incorrectas, las acciones innecesarias y los
+reintentos de formato, admitiéndose como máximo un reintento por salto en ambas
+condiciones.
+
+\subsection{Desviación respecto del diseño original}
+La propuesta original planteaba que los agentes se invocaran entre sí. Durante la
+implementación se verificó que la llamada entre agentes impone un tiempo máximo fijo
+de 120 s, mientras que cada agente requirió entre 100 y 200 s con el modelo local.
+En consecuencia, el ejecutor transportó el resultado de cada agente al siguiente.
+Cada salto siguió siendo un mensaje A2A real, pero la decisión de a qué agente
+invocar no fue tomada por el agente. Esta desviación se aplicó por igual a ambas
+condiciones, por lo que no favorece a ninguna.
+
+\section{Resultados}
+\subsection{Clasificación diferencial}
+En la Tabla~\ref{tab:confusion} se observa que la clasificación fue correcta en las
+ocho corridas, tanto en clase (falla, ataque o sano) como en subtipo, y en ambas
+condiciones. Las dos corridas del escenario normal
+no produjeron falsa alarma ni acción innecesaria en ninguna de las dos condiciones.
+Este resultado indica que la distinción entre falla y ataque es alcanzable a partir
+de las firmas de la Tabla~\ref{tab:firmas} con un modelo local de 9B, pero debe
+matizarse: los escenarios inyectados presentan firmas muy separadas entre sí, por lo
+que el acierto no permite concluir sobre casos ambiguos, como un pico legítimo de
+tráfico.
+
+\begin{table}[htbp]
+\caption{Matriz de confusión del subtipo (ambas condiciones)}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Real $\downarrow$ / Predicho $\rightarrow$} & \textbf{Latencia} & \textbf{DDoS} &
+\textbf{F. bruta} & \textbf{Ninguno} \\
+\midrule
+Latencia      & 2 & 0 & 0 & 0 \\
+DDoS          & 0 & 2 & 0 & 0 \\
+Fuerza bruta  & 0 & 0 & 2 & 0 \\
+Ninguno       & 0 & 0 & 0 & 2 \\
+\bottomrule
+\end{tabular}
+\label{tab:confusion}
+\end{center}
+\end{table}
+
+\subsection{Tiempos de respuesta}
+Los tiempos obtenidos se presentan en la Tabla~\ref{tab:resultados} y se desglosan
+en la Fig.~\ref{fig:mttr}. Como se indica en la Fig.~\ref{fig:mttr}, el tiempo total
+hasta la recuperación estuvo dominado por el tiempo hasta la primera acción y no por
+la recuperación posterior del servicio: una vez aplicada la contramedida, el
+servicio volvió a su estado sano en menos de 26 s en todos los casos. El costo del
+sistema se concentra, por tanto, en la inferencia del modelo y no en la
+infraestructura.
+
+El hallazgo central es que la condición multiagente no redujo el tiempo de
+mitigación. En el escenario DDoS el MTTR aumentó de 109.8 s con agente único a
+174.8 s con la cadena multiagente, un incremento del 59\,\%, y la duración total de
+la cadena pasó de 166.3 s a 307.4 s. No obstante, en la falla de latencia la condición multiagente resultó marginalmente
+más rápida (65.9 s frente a 75.9 s). La
+explicación es que cada salto A2A agrega una invocación completa del modelo, cuyo
+costo con un modelo local de 9B es del orden de decenas de segundos, mientras que la
+especialización no reduce el trabajo de razonamiento en escenarios de firma clara.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=\columnwidth]{fig/mttr_breakdown.pdf}}
+\caption{Tiempo hasta la primera acción (sólido) y recuperación posterior del
+servicio (achurado) por escenario y condición. El total de cada barra corresponde al
+MTTR medido por el monitor independiente. En fuerza bruta multiagente no se ejecutó
+ninguna acción.}
+\label{fig:mttr}
+\end{figure}
+
+\begin{table}[htbp]
+\caption{Resultados del piloto por escenario y condición}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}llccccc@{}}
+\toprule
+\textbf{Escenario} & \textbf{Cond.} & \textbf{Clase} & \textbf{TTD} &
+\textbf{1ª acc.} & \textbf{MTTR} & \textbf{Acc.} \\
+ & & \textbf{OK} & \textbf{(s)} & \textbf{(s)} & \textbf{(s)} & \textbf{ejec.} \\
+\midrule
+Falla         & único & Sí & ---  & 67.3  & 75.9  & 2 \\
+Falla         & multi & Sí & 50.9 & 57.8  & 65.9  & 3 \\
+DDoS          & único & Sí & ---  & 83.9  & 109.8 & 3 \\
+DDoS          & multi & Sí & 47.2 & 151.2 & 174.8 & 3 \\
+Fuerza bruta  & único & Sí & ---  & 56.3  & 71.1  & 1 \\
+Fuerza bruta  & multi & Sí & 75.2 & ---   & ---   & 0 \\
+Normal        & único & Sí & ---  & ---   & ---   & 0 \\
+Normal        & multi & Sí & ---  & ---   & ---   & 0 \\
+\bottomrule
+\multicolumn{7}{l}{\scriptsize $n=1$ por celda. TTD solo observable en la condición
+multiagente.} \\
+\end{tabular}
+\label{tab:resultados}
+\end{center}
+\end{table}
+
+\subsection{Fiabilidad de la ejecución}
+La comparación entre las acciones declaradas por el agente de Mitigación y las
+registradas en la bitácora de auditoría reveló discrepancias en dos de las ocho
+corridas. En fuerza bruta multiagente el agente declaró haber bloqueado una
+dirección IP que nunca fue bloqueada, y el servicio permaneció degradado al final de
+la corrida; es la única celda de la Tabla~\ref{tab:resultados} sin mitigación
+efectiva. En la falla multiagente el agente declaró dos reinicios mientras que la
+bitácora registró tres. Ninguna corrida bloqueó la dirección del tráfico legítimo ni
+una dirección protegida.
+
+Este resultado es relevante desde el punto de vista de ingeniería porque muestra que
+el reporte generado por el sistema no constituye evidencia de lo ocurrido: un agente
+con capacidad de ejecución puede documentar acciones que no realizó. La auditoría
+independiente de las llamadas a herramientas, incorporada como salvaguarda de
+diseño, fue la única vía por la que estas discrepancias resultaron observables, lo
+que concuerda con lo señalado en la literatura sobre agentes con acceso a
+herramientas \cite{hu2026, debenedetti2026}.
+
+\subsection{Amenazas a la validez}
+El tamaño de muestra es de una repetición por celda, por lo que las diferencias de
+tiempo no admiten contraste estadístico y se reportan como preliminares. Se empleó
+un único modelo y una única variante de falla. Los escenarios presentan firmas
+claramente separadas, lo que facilita la clasificación. El DDoS inyectado opera en
+capa de aplicación y no produce respuestas de error, por lo que no cubre la
+inundación de capa de transporte. Finalmente, la delegación entre agentes fue
+sustituida por un relevo externo, de modo que lo evaluado es la especialización de
+los agentes y no su autonomía de coordinación.
+
+\section{Conclusiones}
+Se implementó y se probó Hermes-SOC sobre un banco de pruebas en contenedores. La
+clasificación diferencial entre falla operativa y ataque fue correcta en las ocho
+corridas del piloto, sin falsos positivos en el escenario normal. Sin embargo, la
+especialización multiagente no redujo el tiempo de mitigación frente a un agente
+único y lo aumentó de forma apreciable en el escenario DDoS, lo que sugiere que, con
+modelos locales, el costo de cada salto de comunicación domina sobre el beneficio de
+la especialización. Asimismo, se detectaron discrepancias entre las acciones
+declaradas y las ejecutadas en dos corridas, lo que confirma la necesidad de auditar
+las llamadas a herramientas de forma independiente del reporte del agente. Como
+trabajo futuro se contempla ejecutar el piloto completo de cinco repeticiones por
+celda, incorporar un escenario ambiguo de pico legítimo de tráfico y una línea base
+de detección por reglas sin modelo de lenguaje.
+
+\begin{thebibliography}{00}
+\bibitem{khayat2025} M. Khayat, E. Barka, M. Adel Serhani, F. Sallabi, K. Shuaib, and H. M. Khater, ``Empowering Security Operation Center With Artificial Intelligence and Machine Learning---A Systematic Literature Review,'' \textit{IEEE Access}, vol. 13, pp. 19162--19197, 2025.
+\bibitem{kataria2025} V. Kataria, ``Intelligent Site Reliability Engineering: A Multi-agent LLM Framework for Automated Incident Analysis and Root Cause Determination,'' \textit{Int. J. Intell. Eng. Syst.}, vol. 18, no. 11, pp. 450--466, Dec. 2025.
+\bibitem{srinivas2025} S. Srinivas \textit{et al.}, ``AI-Augmented SOC: A Survey of LLMs and Agents for Security Automation,'' \textit{J. Cybersecurity Priv.}, vol. 5, no. 4, p. 95, Nov. 2025.
+\bibitem{saju2026} M. H. Saju and A. Azim, ``Toward Autonomous SOC Operations: End-to-End LLM Framework for Threat Detection, Query Generation, and Resolution in Security Operations,'' in \textit{Proc. Mach. Learn. Res., vol. 318, 39th Canadian Conf. Artificial Intelligence}, 2026.
+\bibitem{roy2026} J. Roy and S. K. Singh, ``AgentSOC: A Multi-Layer Agentic AI Framework for Security Operations Automation,'' in \textit{Proc. 2026 IEEE 5th Int. Conf. AI in Cybersecurity (ICAIC)}, Feb. 2026, pp. 1--7.
+\bibitem{soldani2023} J. Soldani and A. Brogi, ``Anomaly Detection and Failure Root Cause Analysis in (Micro) Service-Based Cloud Applications: A Survey,'' \textit{ACM Comput. Surv.}, vol. 55, no. 3, pp. 1--39, Mar. 2023.
+\bibitem{tian2026} Y. Tian, Y. Liu, Z. Chong, Z. Huang, Y. Li, and H.-A. Jacobsen, ``GALA: Graph-Augmented LLM Agents for Root Cause Analysis and Incident Response in Microservices,'' in \textit{Proc. 41st IEEE/ACM Int. Conf. Automated Software Engineering}, Oct. 2026, pp. 55--67.
+\bibitem{hmimou2025} Y. Hmimou, M. Tabaa, A. Khiat, and Z. Hidila, ``A Multi-Agent System for Cybersecurity Threat Detection and Correlation Using Large Language Models,'' \textit{IEEE Access}, vol. 13, pp. 150199--150215, 2025.
+\bibitem{hu2026} Y. Hu, C. Fan, S. Samyoun, and J. Du, ``Log-To-Leak: Prompt Injection Attacks on Tool-Using LLM Agents via the Model Context Protocol,'' in \textit{Proc. 1st Workshop on Security, Privacy, and Safety of Agentic AI Systems}, Nov. 2026, pp. 49--60.
+\bibitem{debenedetti2026} E. Debenedetti \textit{et al.}, ``Defeating Prompt Injections by Design,'' in \textit{Proc. IEEE Conf. Secure and Trustworthy Machine Learning (SaTML)}, 2026.
+\end{thebibliography}
+
+\end{document}
