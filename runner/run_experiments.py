@@ -33,7 +33,7 @@ TRUE_SUBTYPE = {"latency": "latency", "memory": "memory", "redis_down": "depende
 CSV_FIELDS = ["run_id", "scenario", "variant", "condition", "rep", "label_true", "subtype_true",
               "pred_class", "pred_subtype", "class_ok", "subtype_ok", "detection_parsed", "report_present",
               "t_detect_s", "t_first_action_s", "mttr_s", "healthy_at_end", "n_actions", "wrong_ip_actions",
-              "unneeded_actions", "claimed_actions", "retries", "chain_s", "hop_states"]
+              "unneeded_actions", "claimed_actions", "retries", "timed_out", "quiesce_s", "chain_s", "hop_states"]
 
 
 def judge(s):
@@ -97,8 +97,45 @@ def read_actions(t_from, t_to):
     return out
 
 
+def agent_names(conditions):
+    return (["deteccion", "mitigacion", "documentacion"] if "multi" in conditions else []) + (["unico"] if "single" in conditions else [])
+
+
+def last_action_ts():
+    if not ACTION_LOG.exists():
+        return 0.0
+    for line in reversed(ACTION_LOG.read_text(encoding="utf-8").splitlines()[-20:]):
+        try:
+            return float(json.loads(line)["ts"])
+        except (ValueError, KeyError):
+            continue
+    return 0.0
+
+
+def quiesce(names, max_wait=1800, quiet_s=60, ping_s=60):
+    """Espera a que ningún agente siga trabajando en una corrida anterior.
+    Un salto que expira (300 s en el servidor A2A de Hermes) NO detiene al agente: sigue ejecutando herramientas y
+    ocupando el modelo, lo que contamina la corrida siguiente. Se espera a que (1) no haya acciones nuevas en
+    `quiet_s` s y (2) todos los agentes respondan un PING en menos de `ping_s` s. Devuelve los s esperados o None."""
+    t0 = time.time()
+    while time.time() - t0 < max_wait:
+        if time.time() - last_action_ts() < quiet_s:
+            time.sleep(10)
+            continue
+        ok = True
+        for n in names:
+            r = ch.send_message(ch.PORTS[n], "Responde exactamente: PONG", ping_s)
+            if r["state"] != "TASK_STATE_COMPLETED" or "PONG" not in r["text"].upper():
+                ok = False
+                break
+        if ok:
+            return round(time.time() - t0, 1)
+        time.sleep(10)
+    return None
+
+
 def ensure_agents(conditions):
-    names = (["deteccion", "mitigacion", "documentacion"] if "multi" in conditions else []) + (["unico"] if "single" in conditions else [])
+    names = agent_names(conditions)
     down = []
     for n in names:
         try:
@@ -117,6 +154,9 @@ def run_one(sc, cond, rep, out, a):
         return
     rdir.mkdir(parents=True, exist_ok=True)
     print(f"[inicio] {rid}", flush=True)
+    q = quiesce(a.agents, a.quiesce_max)
+    if q is None:
+        sys.exit("Los agentes no se calmaron a tiempo: revisa las ventanas de los agentes y reanuda.")
     inj.reset_env()
     time.sleep(a.baseline)
     mon = Monitor()
@@ -160,6 +200,7 @@ def run_one(sc, cond, rep, out, a):
         "healthy_at_end": all(p["healthy"] for p in valid_tail[-2:]) if valid_tail else None,
         "n_actions": len(acts), "wrong_ip_actions": len(wrong_ip),
         "unneeded_actions": len(acts) if sc == "normal" else 0, "claimed_actions": len(claimed), "retries": res.get("retries", 0),
+        "timed_out": any(h["state"] != "TASK_STATE_COMPLETED" for h in res["hops"]), "quiesce_s": q,
         "chain_s": round(t1 - t0, 1), "hop_states": "|".join(h["state"] for h in res["hops"]),
     }
     (rdir / "run.json").write_text(json.dumps({"row": row, "ground_truth": gt, "chain": res, "actions": acts,
@@ -188,6 +229,7 @@ def main():
     ap.add_argument("--tail", type=int, default=15, help="s de monitoreo tras terminar la cadena")
     ap.add_argument("--attack-seconds", type=int, default=900)
     ap.add_argument("--timeout", type=int, default=900, help="timeout por salto A2A (s)")
+    ap.add_argument("--quiesce-max", type=int, default=1800, help="máx. s de espera a que los agentes queden libres entre corridas")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -204,6 +246,7 @@ def main():
         for s, c, r in plan:
             print(" ", s, c, r)
         return
+    a.agents = agent_names(conds)
     ensure_agents(conds)
     out.mkdir(parents=True, exist_ok=True)
     try:

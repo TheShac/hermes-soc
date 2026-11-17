@@ -86,6 +86,12 @@ def evidence_ok(run):
     return abs(rep - real) <= max(3.0, 0.35 * real)
 
 
+def timed_out(row, run):
+    if row.get("timed_out") in ("True", "False"):
+        return row["timed_out"] == "True"
+    return bool(run) and any(h["state"] != "TASK_STATE_COMPLETED" for h in run["chain"]["hops"])
+
+
 def main(d):
     d = Path(d)
     rows = list(csv.DictReader(open(d / "summary.csv", encoding="utf-8")))
@@ -100,17 +106,18 @@ def main(d):
 
     out = [f"# Resumen de resultados: {d.name}\n", f"{len(rows)} corridas. Media [IC bootstrap 95 %] (n).\n",
            "## Tabla I por escenario y condición\n",
-           "| Escenario | Cond. | Corridas | Clase OK | Subtipo OK | JSON válido | Reintentos | TTD (s) | 1ª acción (s) | MTTR (s) | Sano al final | Acc. IP errónea | Acc. declaradas≠reales | Evidencia coherente | Reporte completo | IP correctas | Texto CJK |",
-           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+           "| Escenario | Cond. | Corridas | Clase OK | Clase OK (respondidas) | Subtipo OK | JSON válido | Reintentos | Timeout 300 s | TTD (s) | 1ª acción (s) | MTTR (s) | Sano al final | Acc. IP errónea | Acc. declaradas≠reales | Evidencia coherente | Reporte completo | IP correctas | Texto CJK |",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for (sc, cond), rs in sorted(groups.items()):
         rq = [report_quality(runs[r["run_id"]]) for r in rs if r["run_id"] in runs and runs[r["run_id"]]["chain"].get("report")]
         mism = [actions_mismatch(runs[r["run_id"]]) for r in rs if r["run_id"] in runs]
         evid = [evidence_ok(runs[r["run_id"]]) for r in rs if r["run_id"] in runs]
         out.append("| " + " | ".join([
             sc, cond, str(len(rs)),
-            pct([r["class_ok"] == "True" for r in rs]), pct([r["subtype_ok"] == "True" for r in rs]),
+            pct([r["class_ok"] == "True" for r in rs]), pct([r["class_ok"] == "True" for r in rs if r["detection_parsed"] == "True"]), pct([r["subtype_ok"] == "True" for r in rs]),
             pct([r["detection_parsed"] == "True" for r in rs]),
             f"{sum(num(r['retries']) or 0 for r in rs):.0f}",
+            str(sum(1 for r in rs if timed_out(r, runs.get(r["run_id"])))),
             fmt([num(r["t_detect_s"]) for r in rs]), fmt([num(r["t_first_action_s"]) for r in rs]),
             fmt([num(r["mttr_s"]) for r in rs]),
             pct([r["healthy_at_end"] == "True" for r in rs if r["healthy_at_end"] != ""]),
@@ -146,8 +153,10 @@ def main(d):
         out.append("## Falsos positivos (escenario normal)\n")
         for cond in sorted({r["condition"] for r in fp}):
             rs = [r for r in fp if r["condition"] == cond]
-            bad = [r["pred_class"] != "healthy" or int(r["unneeded_actions"]) > 0 for r in rs]
-            out.append(f"- {cond}: {sum(bad)}/{len(rs)} corridas con falsa alarma o acción innecesaria")
+            alarm = sum(r["pred_class"] in ("fault", "attack") for r in rs)
+            extra = sum(int(r["unneeded_actions"]) > 0 for r in rs)
+            nores = sum(r["pred_class"] == "" for r in rs)
+            out.append(f"- {cond}: {alarm}/{len(rs)} falsas alarmas; {extra}/{len(rs)} con acciones innecesarias; {nores}/{len(rs)} sin respuesta")
     text = "\n".join(out)
     (d / "resumen.md").write_text(text, encoding="utf-8")
     print(text)

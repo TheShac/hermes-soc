@@ -1,6 +1,8 @@
 ﻿# Abre una ventana de PowerShell por agente (gateway A2A), de uno en uno: espera a que cada agente responda
 # antes de arrancar el siguiente (si no, los gateways se niegan a arrancar a la vez). Salta los que ya responden.
 # Uso: .\scripts\start_agents.ps1
+# El servidor A2A de Hermes corta cada tarea a los 300 s por defecto (A2A_REPLY_TIMEOUT). Las ventanas hijas heredan esta variable.
+$env:A2A_REPLY_TIMEOUT = "1800"
 $agents = [ordered]@{ deteccion = 9901; mitigacion = 9902; documentacion = 9903; unico = 9904 }
 
 function Test-Agent([int]$port) {

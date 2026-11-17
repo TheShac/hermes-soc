@@ -37,6 +37,7 @@ El diseño plantea que los agentes se comuniquen entre sí. En la implementació
 - TTD solo existe en multiagente; en ambas condiciones se mide el tiempo hasta la primera acción real y el MTTR.
 - Métricas de fiabilidad propias: JSON válido, reintentos, acciones declaradas ≠ ejecutadas, evidencia coherente con la medición real, texto en otros alfabetos en el reporte, IP erróneas bloqueadas.
 - Hallazgos del humo (n=1 por celda, solo orientativos): clasificación correcta en las 6 corridas; en una corrida multiagente Mitigación declaró una acción que no ejecutó.
+- **Piloto v0 descartado**: el servidor A2A de Hermes corta cada tarea a los 300 s sin detener al agente; esas tareas "zombi" ejecutaron acciones durante la corrida siguiente (4 casos) y el agente único expiró en 12 de 20 corridas. Antes de comparar condiciones hay que eliminar esa contaminación y declarar cuántas corridas expiran por condición (el tiempo de tarea es en sí un resultado: el agente único hace todo en una tarea más larga).
 - Tamaño de muestra: piloto de 5 repeticiones por escenario y condición (+ escenario `normal` para falsos positivos). Intervalos bootstrap del 95 %; con n tan bajo son amplios y no se deben presentar como diferencias concluyentes.
 
 ## 6. Limitaciones a mencionar

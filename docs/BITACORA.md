@@ -1,6 +1,6 @@
 # Bitácora de implementación: Hermes-SOC
 
-Última actualización: 2026-11-09. Estado: banco de pruebas, agentes, herramientas, ejecutor y análisis funcionando; **piloto de 40 corridas aún no ejecutado**.
+Última actualización: 2026-11-09. Estado: banco de pruebas, agentes, herramientas, ejecutor y análisis funcionando. El primer piloto (40 corridas) se ejecutó pero **no es válido para comparar** (ver §5, últimas filas); se repetirá tras corregir los timeouts.
 
 ## 1. Objetivo y alcance
 Implementar y probar el pre-paper "Hermes-SOC": un SOC multiagente sobre Hermes Agent con tres agentes que se comunican por A2A
@@ -84,6 +84,8 @@ Con n=1 por celda son datos de humo, no resultados.
 | Mitigación declaró una acción que no ejecutó | Alucinación del modelo | Regla reforzada en el prompt; se mide como "acciones declaradas ≠ ejecutadas" |
 | `ModuleNotFoundError: mcp.server.fastmcp` | `mcp` 2.x renombró `FastMCP` a `MCPServer` | Los servidores soportan ambas versiones |
 | Scripts de PowerShell | `param` debe ir primero; acentos sin BOM | Reordenado y guardados con BOM |
+| Piloto v0: 14 de 40 saltos terminaron con `[agent did not reply in time]` a los 300 s exactos (12 del agente único, 2 de Detección y 1 de Mitigación en multi) | El servidor A2A de Hermes corta la tarea a los 300 s, pero **el agente sigue trabajando**: ejecuta herramientas y ocupa el modelo durante la corrida siguiente | El ejecutor espera a que los agentes queden libres antes de cada corrida (`quiesce`: sin acciones nuevas 60 s y los 4 agentes responden un PING en <60 s) y registra `timed_out`; el límite SÍ es configurable: variable de entorno `A2A_REPLY_TIMEOUT` (por defecto 300; leída en `plugins/platforms/a2a/adapter.py`); `start_agents.ps1` la fija en 1800 |
+| Piloto v0: acciones de mitigación en corridas `normal` y sobre IP que no atacaban | Eran del agente de la corrida anterior que había expirado (4 casos, todos justo tras un timeout) | Mismo `quiesce`; la carpeta se conserva como `piloto_v0_contaminado` y no se usa para comparar |
 | Métricas de análisis engañosas | Contaba herramientas de consulta como acciones; penalizaba nombrar la IP del cliente legítimo | Se corrigió `analyze.py` |
 
 ## 6. Limitaciones y desviaciones respecto al paper
@@ -96,7 +98,7 @@ Con n=1 por celda son datos de humo, no resultados.
 
 ## 7. Pendiente (retomar mañana)
 1. Verificar la respuesta de Mitigación tras reforzar el prompt y revisar la sección "Discrepancias" de `analyze.py` sobre `results/raw/humo` (`fault_multi_00` también marcó discrepancia con 3 acciones reales).
-2. **Ejecutar el piloto** (40 corridas, ~3.5-4 h):
+2. **Repetir el piloto** (40 corridas, ~3.5-4 h; renombrar antes `results/raw/piloto` a `results/raw/piloto_v0_contaminado`):
    `python runner/run_experiments.py --scenarios fault,ddos,bruteforce,normal --conditions multi,single --reps 5 --out results/raw/piloto` y luego `python analysis/analyze.py results/raw/piloto`.
 3. Restringir toolsets: `mitigacion`, `documentacion` y `unico` solo con A2A (+MCP); Documentación sin herramientas de archivos.
 4. Reproducibilidad: desactivar memoria, skills y `session_search` en los perfiles; fijar temperatura.

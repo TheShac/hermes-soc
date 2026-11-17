@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
-"""Genera la Fig. 1 del articulo a partir de los summary.csv del ejecutor.
+"""Genera las figuras del articulo a partir del summary.csv del ejecutor.
 
 Uso:
-    python make_figures.py results/raw/humo/summary.csv results/raw/prueba2/summary.csv
+    pip install matplotlib
+    python paper/make_figures.py results/raw/piloto/summary.csv
 
-Salida: fig/mttr_breakdown.pdf (vectorial, ancho de una columna IEEE).
+Salidas (vectoriales, ancho de una columna IEEE):
+    fig/desenlace.pdf        Fig. 2: desenlace de cada corrida por escenario y condicion
+    fig/mttr_breakdown.pdf   Fig. 3: tiempo hasta la primera accion y recuperacion
 """
 import csv
-import sys
 import os
+import sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-ETIQUETAS = {"fault": "Falla (latencia)", "ddos": "DDoS", "bruteforce": "Fuerza bruta"}
-ORDEN = ["fault", "ddos", "bruteforce"]
+ETIQ = {"fault": "Falla", "ddos": "DDoS", "bruteforce": "F. bruta", "normal": "Normal"}
+ORDEN_DESENLACE = ["fault", "ddos", "bruteforce", "normal"]
+ORDEN_MTTR = ["fault", "ddos", "bruteforce"]
+COND = [("single", "Agente único", ""), ("multi", "Multiagente", "///")]
 
 
 def leer(paths):
     filas = []
     for p in paths:
         with open(p, newline="", encoding="utf-8") as fh:
-            filas.extend(csv.DictReader(fh))
+            filas.extend(r for r in csv.DictReader(fh) if r.get("run_id"))
     return filas
 
 
@@ -32,79 +37,109 @@ def num(v):
         return None
 
 
-def agregar(filas):
-    """Promedia por (escenario, condicion) las corridas que si mitigaron."""
-    acc = {}
-    for f in filas:
-        esc, cond = f["scenario"], f["condition"]
-        if esc not in ORDEN:
-            continue
-        acc.setdefault((esc, cond), {"first": [], "mttr": [], "n": 0, "mitigo": 0})
-        a = acc[(esc, cond)]
-        a["n"] += 1
-        fa, mt = num(f.get("t_first_action_s")), num(f.get("mttr_s"))
-        if fa is not None and mt is not None:
-            a["first"].append(fa)
-            a["mttr"].append(mt)
-            a["mitigo"] += 1
-    return acc
+def bl(v):
+    return str(v).strip().lower() == "true"
 
 
-def main(paths):
-    acc = agregar(leer(paths))
+def fig_desenlace(filas):
+    """Composicion del desenlace: correcta / respondio y erro / sin respuesta."""
+    fig, ax = plt.subplots(figsize=(3.5, 2.4))
+    ancho = 0.36
+    for ci, (cond, lab, hatch) in enumerate(COND):
+        pos, ok, mal, sin = [], [], [], []
+        for i, esc in enumerate(ORDEN_DESENLACE):
+            s = [r for r in filas if r["scenario"] == esc and r["condition"] == cond]
+            n_ok = sum(bl(r["class_ok"]) for r in s)
+            n_par = sum(bl(r["detection_parsed"]) for r in s)
+            pos.append(i + (ci - 0.5) * ancho)
+            ok.append(n_ok)
+            mal.append(n_par - n_ok)
+            sin.append(len(s) - n_par)
+        base = [0] * len(pos)
+        ax.bar(pos, ok, ancho, color="#4C72B0", edgecolor="black", linewidth=0.5,
+               hatch=hatch, label=lab if ci == 0 else lab)
+        ax.bar(pos, mal, ancho, bottom=ok, color="#BBBBBB", edgecolor="black",
+               linewidth=0.5, hatch=hatch)
+        base = [a + b for a, b in zip(ok, mal)]
+        ax.bar(pos, sin, ancho, bottom=base, color="white", edgecolor="black",
+               linewidth=0.5, hatch=hatch)
 
-    fig, ax = plt.subplots(figsize=(3.5, 2.35))
-    ancho, x = 0.36, range(len(ORDEN))
-    # Relleno y trama distintos por serie: la figura debe seguir siendo
-    # legible en escala de grises (impresion en blanco y negro).
-    estilos = {
-        "single": dict(off=-ancho / 2, color="#4C72B0", hatch="", label="Agente único"),
-        "multi": dict(off=ancho / 2, color="#DD8452", hatch="///", label="Multiagente"),
-    }
-
-    for cond, st in estilos.items():
-        p_first, p_rec, pos = [], [], []
-        for i, esc in enumerate(ORDEN):
-            a = acc.get((esc, cond))
-            pos.append(i + st["off"])
-            if a and a["mitigo"]:
-                f = sum(a["first"]) / len(a["first"])
-                m = sum(a["mttr"]) / len(a["mttr"])
-                p_first.append(f)
-                p_rec.append(max(m - f, 0.0))
-            else:
-                p_first.append(0.0)
-                p_rec.append(0.0)
-                ax.text(i + st["off"], 3, "sin\nmitigación", ha="center", va="bottom",
-                        fontsize=5.5, rotation=90, color="#555555")
-        ax.bar(pos, p_first, ancho, color=st["color"], label=st["label"],
-               edgecolor="black", linewidth=0.5, hatch=st["hatch"])
-        ax.bar(pos, p_rec, ancho, bottom=p_first, color="white",
-               edgecolor="black", linewidth=0.5, hatch=st["hatch"])
-
-    ax.set_xticks(list(x))
-    ax.set_xticklabels([ETIQUETAS[e] for e in ORDEN])
-    ax.set_ylabel("Tiempo desde la inyección (s)")
+    ax.set_xticks(range(len(ORDEN_DESENLACE)))
+    ax.set_xticklabels([ETIQ[e] for e in ORDEN_DESENLACE])
+    ax.set_ylabel("Corridas (de 5)")
     ax.set_xlabel("Escenario inyectado")
-    ax.set_ylim(0, 200)
-    ax.set_xlim(-0.62, len(ORDEN) - 1 + 0.62)
+    ax.set_ylim(0, 6.4)
+    ax.set_yticks(range(0, 6))
     ax.yaxis.grid(True, linewidth=0.4, alpha=0.5)
     ax.set_axisbelow(True)
     for lado in ("top", "right"):
         ax.spines[lado].set_visible(False)
 
-    h, l = ax.get_legend_handles_labels()
-    extra = plt.Rectangle((0, 0), 1, 1, facecolor="white",
-                          edgecolor="black", linewidth=0.5)
-    ax.legend(h + [extra], l + ["Recuperación tras la acción"],
-              fontsize=5.8, frameon=False, loc="upper left", ncol=1,
-              handlelength=1.4, borderpad=0.2, labelspacing=0.3)
-
+    leyenda = [
+        plt.Rectangle((0, 0), 1, 1, facecolor="#4C72B0", edgecolor="black", linewidth=0.5),
+        plt.Rectangle((0, 0), 1, 1, facecolor="#BBBBBB", edgecolor="black", linewidth=0.5),
+        plt.Rectangle((0, 0), 1, 1, facecolor="white", edgecolor="black", linewidth=0.5),
+        plt.Rectangle((0, 0), 1, 1, facecolor="white", edgecolor="black", linewidth=0.5,
+                      hatch="///"),
+    ]
+    ax.legend(leyenda,
+              ["Clasificación correcta", "Respondió y erró", "Sin respuesta",
+               "Trama: multiagente"],
+              fontsize=5.4, frameon=False, loc="upper center", ncol=2,
+              handlelength=1.3, borderpad=0.1, labelspacing=0.25, columnspacing=0.8)
     fig.tight_layout(pad=0.3)
+    guardar(fig, "desenlace")
+
+
+def fig_mttr(filas):
+    """Tiempo hasta la primera accion y recuperacion posterior (media por celda)."""
+    fig, ax = plt.subplots(figsize=(3.5, 2.3))
+    ancho = 0.36
+    for ci, (cond, lab, hatch) in enumerate(COND):
+        pos, p_first, p_rec = [], [], []
+        for i, esc in enumerate(ORDEN_MTTR):
+            s = [r for r in filas if r["scenario"] == esc and r["condition"] == cond]
+            par = [(num(r["t_first_action_s"]), num(r["mttr_s"])) for r in s]
+            par = [(a, m) for a, m in par if a is not None and m is not None]
+            pos.append(i + (ci - 0.5) * ancho)
+            if par:
+                a = sum(x for x, _ in par) / len(par)
+                m = sum(y for _, y in par) / len(par)
+                p_first.append(a)
+                p_rec.append(max(m - a, 0.0))
+                ax.text(pos[-1], m + 4, f"n={len(par)}", ha="center", fontsize=5.2,
+                        color="#444444")
+            else:
+                p_first.append(0.0)
+                p_rec.append(0.0)
+        ax.bar(pos, p_first, ancho, color="#4C72B0", edgecolor="black", linewidth=0.5,
+               hatch=hatch, label=lab)
+        ax.bar(pos, p_rec, ancho, bottom=p_first, color="white", edgecolor="black",
+               linewidth=0.5, hatch=hatch)
+
+    ax.set_xticks(range(len(ORDEN_MTTR)))
+    ax.set_xticklabels([ETIQ[e] for e in ORDEN_MTTR])
+    ax.set_ylabel("Tiempo desde la inyección (s)")
+    ax.set_xlabel("Escenario inyectado")
+    ax.set_ylim(0, 175)
+    ax.yaxis.grid(True, linewidth=0.4, alpha=0.5)
+    ax.set_axisbelow(True)
+    for lado in ("top", "right"):
+        ax.spines[lado].set_visible(False)
+    h, l = ax.get_legend_handles_labels()
+    extra = plt.Rectangle((0, 0), 1, 1, facecolor="white", edgecolor="black", linewidth=0.5)
+    ax.legend(h + [extra], l + ["Recuperación tras la acción"], fontsize=5.6,
+              frameon=False, loc="upper left", handlelength=1.3, borderpad=0.15,
+              labelspacing=0.3)
+    fig.tight_layout(pad=0.3)
+    guardar(fig, "mttr_breakdown")
+
+
+def guardar(fig, nombre):
     os.makedirs("fig", exist_ok=True)
-    fig.savefig("fig/mttr_breakdown.pdf", bbox_inches="tight")
-    fig.savefig("fig/mttr_breakdown.png", dpi=600, bbox_inches="tight")
-    print("escrito fig/mttr_breakdown.pdf")
+    fig.savefig(f"fig/{nombre}.pdf", bbox_inches="tight")
+    fig.savefig(f"fig/{nombre}.png", dpi=600, bbox_inches="tight")
+    print(f"escrito fig/{nombre}.pdf")
 
 
 if __name__ == "__main__":
@@ -113,7 +148,7 @@ if __name__ == "__main__":
         "ytick.labelsize": 6.8, "font.family": "serif",
         "font.serif": ["DejaVu Serif"], "pdf.fonttype": 42,
     })
-    main(sys.argv[1:] or [
-        "/mnt/user-data/uploads/hermes-soc/results/raw/humo/summary.csv",
-        "/mnt/user-data/uploads/hermes-soc/results/raw/prueba2/summary.csv",
-    ])
+    paths = sys.argv[1:] or ["/mnt/user-data/uploads/0993a181-summary.csv"]
+    filas = leer(paths)
+    fig_desenlace(filas)
+    fig_mttr(filas)

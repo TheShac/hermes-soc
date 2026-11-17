@@ -16,3 +16,4 @@ Ver `PLAN.md` para el plan de trabajo y el estado de cada paso.
 Bitácora de lo implementado (qué funciona y qué no): [docs/BITACORA.md](docs/BITACORA.md).
 
 Notas metodológicas para el paper/taller: [docs/NOTAS_PARA_EL_PAPER.md](docs/NOTAS_PARA_EL_PAPER.md).
+- [Plan de mejora y banco de pruebas realista](docs/PLAN_MEJORA_Y_EVALUACION.md)

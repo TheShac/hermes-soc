@@ -11,6 +11,10 @@
 \usepackage{booktabs}
 \usepackage{array}
 
+% hyperref va SIEMPRE al final de los paquetes; hidelinks evita el recuadro de color
+\usepackage[hidelinks,breaklinks=true]{hyperref}
+\urlstyle{tt}
+
 % Rotulos en espanol (sin babel, para no alterar el formato IEEE)
 \renewcommand{\tablename}{TABLA}
 \renewcommand{\figurename}{Fig.}
@@ -39,13 +43,19 @@ sistema multiagente construido sobre Hermes Agent, en el que tres agentes
 especializados se comunican mediante el protocolo Agent-to-Agent (A2A): un agente de
 Detección que clasifica el evento a partir de métricas y registros, un agente de
 Mitigación que ejecuta la contramedida correspondiente mediante herramientas MCP, y
-un agente de Documentación que genera el reporte técnico del incidente. El sistema
+un agente de Documentación que genera el reporte técnico del incidente. Los tres
+agentes comparten un mismo modelo local y se diferencian únicamente por su prompt de
+rol y por las herramientas a las que acceden, sin entrenamiento adicional. El sistema
 fue implementado sobre un banco de pruebas en contenedores y evaluado en cuatro
 escenarios inyectados (falla de latencia, DDoS de capa de aplicación, fuerza bruta y
 operación normal) bajo dos condiciones: la cadena multiagente y un agente único que
-ejecuta las tres fases. En el piloto realizado se obtuvo una clasificación correcta
-en las ocho corridas, sin falsos positivos, y se observó que la especialización
-multiagente no redujo el tiempo de mitigación respecto del agente único.
+ejecuta las tres fases. En un piloto de 40 corridas se observó que la clasificación fue correcta en el
+89\,\% de las corridas con respuesta en la condición multiagente y en el 100\,\% en la
+de agente único, sin falsas alarmas en el escenario normal. Sin embargo, el agente
+único completó la tarea en solo 7 de 20 corridas, frente a 18 de 20 de la cadena
+multiagente, al agotar de forma sistemática el tope de tiempo de la plataforma. Se
+detectaron además discrepancias entre las acciones declaradas y las ejecutadas en 13
+de las 40 corridas.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -163,10 +173,12 @@ escenarios correspondieron a una falla operativa de latencia, un ataque DDoS de 
 de aplicación, un ataque de fuerza bruta y una condición de operación normal
 destinada a medir falsos positivos. Las condiciones correspondieron a la cadena
 multiagente de tres perfiles y a un agente único que resolvió las tres fases. El
-orden de ejecución fue aleatorizado por bloques. Los resultados reportados en este
-trabajo corresponden a un piloto de una repetición por celda, es decir, ocho
-corridas válidas; por el costo de cómputo de cada corrida, entre dos y ocho minutos,
-el tamaño de muestra es reducido y los valores se interpretan como preliminares.
+orden de ejecución fue aleatorizado por bloques. Se ejecutaron cinco repeticiones por
+celda, lo que totaliza 40 corridas. En el escenario de falla la variante fue rotada
+entre latencia, agotamiento de memoria e indisponibilidad de la dependencia, de modo
+que las cinco repeticiones cubrieran los tres modos de fallo. Por el costo de cómputo
+de cada corrida, del orden de minutos, el tamaño de muestra sigue siendo reducido y
+los intervalos se interpretan como preliminares.
 
 \subsection{Banco de pruebas}
 El banco de pruebas fue desplegado sobre Docker en una red fija
@@ -217,8 +229,10 @@ Puertos A2A & 9901--9904 \\
 \subsection{Inyección de escenarios}
 Cada escenario fue inyectado por un módulo que registró su etiqueta real y sus
 parámetros en un archivo \texttt{ground\_truth.json}, el cual constituyó la verdad
-de referencia contra la que se evaluó la clasificación. La falla de latencia fue
-introducida con \texttt{tc netem} dentro del contenedor objetivo. El DDoS fue
+de referencia contra la que se evaluó la clasificación. Las fallas fueron
+introducidas mediante tres mecanismos: latencia artificial con \texttt{tc netem},
+agotamiento de memoria con \texttt{stress-ng} e indisponibilidad de la dependencia
+mediante la detención del contenedor de Redis. El DDoS fue
 generado desde tres contenedores atacantes con 100 conexiones concurrentes por
 origen. La fuerza bruta fue generada desde un único origen contra el extremo de
 autenticación. Las firmas observadas para cada escenario, medidas en ventanas de
@@ -245,6 +259,23 @@ Fuerza bruta  & 80   & 2 & ---     & 99.7\,\% de 401 \\
 \label{tab:firmas}
 \end{center}
 \end{table}
+
+\subsection{Configuración de los agentes}
+Los agentes no fueron entrenados. Se empleó el mismo modelo base en las dos
+condiciones, sin ajuste fino, sin modificación de pesos y sin base de conocimiento
+externa, de modo que el comportamiento de cada agente quedó determinado
+exclusivamente por su configuración en tiempo de inferencia. Esta configuración
+constó de tres elementos: un prompt de rol que fijó el procedimiento, los criterios
+orientativos de clasificación, el formato de salida en JSON y la prohibición de
+declarar datos no observados; el conjunto de herramientas MCP accesible, que delimitó
+qué pudo observar y qué pudo ejecutar cada agente; y el mensaje de disparo con el que
+el ejecutor inició cada tarea y transportó el resultado al siguiente agente.
+
+En la condición multiagente, cada uno de los tres agentes dispuso de su propio prompt
+y de un subconjunto acotado de herramientas. En la condición de agente único, el mismo
+modelo recibió un prompt que cubrió las tres fases y la totalidad de las herramientas.
+En consecuencia, la variable manipulada fue la arquitectura y el reparto del trabajo,
+y no el modelo ni su capacidad.
 
 \subsection{Herramientas y salvaguardas}
 El agente de Detección dispuso únicamente de herramientas de solo lectura, que
@@ -274,16 +305,16 @@ el reporte generado y la fila de métricas correspondiente. El ejecutor fue dise
 para ser reanudable, de modo que una interrupción no invalida las corridas previas.
 
 \subsection{Reproducibilidad}
-El código del banco de pruebas, de los agentes, de las herramientas MCP, del
-ejecutor y del análisis fue versionado en un repositorio junto con el archivo de
+El código del banco de pruebas, de los agentes, de las herramientas MCP, del ejecutor
+y del análisis fue publicado en un repositorio de acceso abierto\footnote{Disponible
+en \url{https://github.com/TheShac/hermes-soc}.} junto con el archivo de
 dependencias y la definición de los contenedores, de manera que el entorno puede ser
-reconstruido sin intervención manual. Los perfiles de los agentes, sus instrucciones
-y los parámetros del modelo se encuentran documentados en el repositorio, al igual
-que la rutina de verificación del banco de pruebas. Las trazas crudas de cada
-corrida fueron conservadas, por lo que las métricas reportadas pueden ser
-recalculadas a partir de ellas.
-% Si el repositorio queda publico, agregar aqui la URL:
-% \footnote{Disponible en \texttt{https://github.com/<usuario>/hermes-soc}.}
+reconstruido sin intervención manual. Los prompts de rol de los cuatro perfiles, las
+rutinas de inyección de escenarios, la rutina de verificación del banco de pruebas y
+el procedimiento de análisis se encuentran igualmente versionados. Las trazas crudas
+de cada corrida fueron conservadas y las tablas de métricas consolidadas se
+distribuyen con el repositorio, por lo que los valores reportados pueden ser
+recalculados de forma independiente.
 
 \subsection{Métricas e instrumentación}
 Se registraron las siguientes métricas por corrida. El acierto de clase y de
@@ -307,131 +338,219 @@ Cada salto siguió siendo un mensaje A2A real, pero la decisión de a qué agent
 invocar no fue tomada por el agente. Esta desviación se aplicó por igual a ambas
 condiciones, por lo que no favorece a ninguna.
 
+Se constató asimismo que la plataforma de agentes interrumpe toda tarea que supere los
+300 s, con independencia del tiempo máximo configurado en el ejecutor, que fue fijado
+en 900 s por salto. Dicho tope no fue impuesto por el diseño experimental y resultó
+determinante en los resultados, por lo que se registró como una variable observada.
+
 \section{Resultados}
+Se completaron las 40 corridas previstas. Los resultados agregados por escenario y
+condición se presentan en la Tabla~\ref{tab:resultados}.
+
+\subsection{Fiabilidad de respuesta}
+En la Fig.~\ref{fig:desenlace} se observa que el desenlace de cada corrida estuvo
+dominado por un factor no previsto en el diseño: la capacidad del sistema de emitir
+una respuesta. La condición multiagente produjo una salida estructurada válida en 18
+de 20 corridas (90\,\%), mientras que el agente único lo hizo en 7 de 20 (35\,\%). En
+las corridas restantes la tarea A2A terminó en estado fallido tras 300 s sin devolver
+contenido: 11 corridas del agente único y 3 de la cadena multiagente. La mediana de
+duración de la cadena fue de 116.6 s en la condición multiagente y de 300.1 s en la
+de agente único, valor este último que coincide con el tope de la plataforma.
+
+Esto indica que el límite no fue alcanzado por azar, sino que el agente único lo
+agotó de forma sistemática. Dicho agente debió resolver las tres fases dentro de un
+mismo contexto y con la totalidad de las herramientas declaradas, lo que elevó tanto
+la longitud del contexto como el número de invocaciones del modelo por tarea. Por
+consiguiente, la especialización en agentes no actuó aquí como una optimización del
+desempeño, sino como la condición que permitió que la tarea cupiera dentro del
+presupuesto de tiempo de la plataforma.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=\columnwidth]{fig/desenlace.pdf}}
+\caption{Desenlace de las corridas por escenario y condición. Las barras sin trama
+corresponden al agente único y las tramadas a la cadena multiagente. El segmento
+blanco indica las corridas en que la tarea expiró sin devolver una salida
+estructurada.}
+\label{fig:desenlace}
+\end{figure}
+
 \subsection{Clasificación diferencial}
-En la Tabla~\ref{tab:confusion} se observa que la clasificación fue correcta en las
-ocho corridas, tanto en clase (falla, ataque o sano) como en subtipo, y en ambas
-condiciones. Las dos corridas del escenario normal
-no produjeron falsa alarma ni acción innecesaria en ninguna de las dos condiciones.
-Este resultado indica que la distinción entre falla y ataque es alcanzable a partir
-de las firmas de la Tabla~\ref{tab:firmas} con un modelo local de 9B, pero debe
-matizarse: los escenarios inyectados presentan firmas muy separadas entre sí, por lo
-que el acierto no permite concluir sobre casos ambiguos, como un pico legítimo de
-tráfico.
+Al restringir el análisis a las corridas que sí respondieron, la clasificación fue
+correcta en el 89\,\% de los casos en la condición multiagente y en el 100\,\% en la
+de agente único. En otras palabras, el agente único no se equivocó cuando respondió;
+lo que ocurrió es que respondió en poco más de un tercio de las corridas. Sobre el
+total de corridas, la clase fue correcta en 16 de 20 con la cadena multiagente y en 7
+de 20 con el agente único.
+
+La matriz de confusión de la condición multiagente se presenta en la
+Tabla~\ref{tab:confusion}. Los dos errores de clase se produjeron en el escenario de
+falla por agotamiento de memoria: en una corrida el sistema informó un estado sano
+pese a la degradación, y en otra atribuyó la falla a un ataque. A ellos se suma una
+confusión de subtipo en la que una caída de la dependencia fue informada como falla
+de latencia, lo que resulta coherente con la firma observada, ya que la indisponibilidad
+de Redis eleva la latencia percibida. No se registró ninguna falsa alarma en el
+escenario normal en ninguna de las dos condiciones.
 
 \begin{table}[htbp]
-\caption{Matriz de confusión del subtipo (ambas condiciones)}
+\caption{Matriz de confusión del subtipo, condición multiagente}
 \begin{center}
 \footnotesize
-\begin{tabular}{@{}lcccc@{}}
+\setlength{\tabcolsep}{3.4pt}
+\begin{tabular}{@{}lcccccc@{}}
 \toprule
-\textbf{Real $\downarrow$ / Predicho $\rightarrow$} & \textbf{Latencia} & \textbf{DDoS} &
-\textbf{F. bruta} & \textbf{Ninguno} \\
+\textbf{Real $\downarrow$} & \textbf{F. bruta} & \textbf{DDoS} & \textbf{Lat.} &
+\textbf{Mem.} & \textbf{Ning.} & \textbf{S/r} \\
 \midrule
-Latencia      & 2 & 0 & 0 & 0 \\
-DDoS          & 0 & 2 & 0 & 0 \\
-Fuerza bruta  & 0 & 0 & 2 & 0 \\
-Ninguno       & 0 & 0 & 0 & 2 \\
+Fuerza bruta  & \textbf{5} & 0 & 0 & 0 & 0 & 0 \\
+DDoS          & 0 & \textbf{3} & 0 & 0 & 0 & 2 \\
+Latencia      & 0 & 0 & \textbf{2} & 0 & 0 & 0 \\
+Memoria       & 0 & 0 & 0 & \textbf{1} & 1 & 0 \\
+Dependencia   & 0 & 0 & 1 & 0 & 0 & 0 \\
+Ninguno       & 0 & 0 & 0 & 0 & \textbf{5} & 0 \\
 \bottomrule
+\multicolumn{7}{l}{\scriptsize S/r: la tarea expiró sin devolver una salida
+estructurada.} \\
 \end{tabular}
 \label{tab:confusion}
 \end{center}
 \end{table}
 
 \subsection{Tiempos de respuesta}
-Los tiempos obtenidos se presentan en la Tabla~\ref{tab:resultados} y se desglosan
-en la Fig.~\ref{fig:mttr}. Como se indica en la Fig.~\ref{fig:mttr}, el tiempo total
-hasta la recuperación estuvo dominado por el tiempo hasta la primera acción y no por
-la recuperación posterior del servicio: una vez aplicada la contramedida, el
-servicio volvió a su estado sano en menos de 26 s en todos los casos. El costo del
-sistema se concentra, por tanto, en la inferencia del modelo y no en la
-infraestructura.
+Los tiempos se desglosan en la Fig.~\ref{fig:mttr}. Como se indica en dicha figura,
+el tiempo total hasta la recuperación estuvo dominado por el tiempo hasta la primera
+acción y no por la recuperación posterior del servicio, que se completó en menos de
+30 s en todas las celdas. Por consiguiente, el costo del sistema se concentra en la
+inferencia del modelo y no en la infraestructura.
 
-El hallazgo central es que la condición multiagente no redujo el tiempo de
-mitigación. En el escenario DDoS el MTTR aumentó de 109.8 s con agente único a
-174.8 s con la cadena multiagente, un incremento del 59\,\%, y la duración total de
-la cadena pasó de 166.3 s a 307.4 s. No obstante, en la falla de latencia la condición multiagente resultó marginalmente
-más rápida (65.9 s frente a 75.9 s). La
-explicación es que cada salto A2A agrega una invocación completa del modelo, cuyo
-costo con un modelo local de 9B es del orden de decenas de segundos, mientras que la
-especialización no reduce el trabajo de razonamiento en escenarios de firma clara.
+El tiempo medio hasta la primera acción fue de 79.4 s en la condición multiagente
+($n=11$) y de 132.8 s en la de agente único ($n=10$). El MTTR medio fue, en cambio,
+de 114.5 s y 104.9 s respectivamente, sin diferencia apreciable. No obstante, esta
+última comparación debe leerse con cautela: solo admite las corridas en que hubo
+mitigación medible, que son la mayoría en la condición multiagente y una minoría en
+la de agente único, por lo que compara el mejor caso del agente único contra el caso
+típico de la cadena. El tiempo hasta la detección, observable únicamente en la
+condición multiagente, tuvo una mediana de 59.4 s sobre las 13 corridas con detección
+válida.
 
 \begin{figure}[htbp]
 \centerline{\includegraphics[width=\columnwidth]{fig/mttr_breakdown.pdf}}
-\caption{Tiempo hasta la primera acción (sólido) y recuperación posterior del
-servicio (achurado) por escenario y condición. El total de cada barra corresponde al
-MTTR medido por el monitor independiente. En fuerza bruta multiagente no se ejecutó
-ninguna acción.}
+\caption{Tiempo medio hasta la primera acción (sólido) y recuperación posterior del
+servicio (blanco) por escenario y condición. El total de cada barra corresponde al
+MTTR medido por el monitor independiente. Se indica el número de corridas que aporta
+cada celda.}
 \label{fig:mttr}
 \end{figure}
 
 \begin{table}[htbp]
-\caption{Resultados del piloto por escenario y condición}
+\caption{Resultados del piloto por escenario y condición ($n=5$ por celda)}
 \begin{center}
 \footnotesize
-\begin{tabular}{@{}llccccc@{}}
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}llcccc@{}}
 \toprule
-\textbf{Escenario} & \textbf{Cond.} & \textbf{Clase} & \textbf{TTD} &
-\textbf{1ª acc.} & \textbf{MTTR} & \textbf{Acc.} \\
- & & \textbf{OK} & \textbf{(s)} & \textbf{(s)} & \textbf{(s)} & \textbf{ejec.} \\
+\textbf{Escenario} & \textbf{Cond.} & \textbf{Clase} & \textbf{Expiró} &
+\textbf{TTD} & \textbf{MTTR} \\
+ & & \textbf{OK} & \textbf{300 s} & \textbf{(s)} & \textbf{(s)} \\
 \midrule
-Falla         & único & Sí & ---  & 67.3  & 75.9  & 2 \\
-Falla         & multi & Sí & 50.9 & 57.8  & 65.9  & 3 \\
-DDoS          & único & Sí & ---  & 83.9  & 109.8 & 3 \\
-DDoS          & multi & Sí & 47.2 & 151.2 & 174.8 & 3 \\
-Fuerza bruta  & único & Sí & ---  & 56.3  & 71.1  & 1 \\
-Fuerza bruta  & multi & Sí & 75.2 & ---   & ---   & 0 \\
-Normal        & único & Sí & ---  & ---   & ---   & 0 \\
-Normal        & multi & Sí & ---  & ---   & ---   & 0 \\
+Falla        & multi  & 3/5 & 0 & 129.1 & 124.4 \\
+Falla        & único  & 3/5 & 2 & ---   & 121.4 \\
+DDoS         & multi  & 3/5 & 3 & 182.7 & 121.3 \\
+DDoS         & único  & 1/5 & 3 & ---   & 99.7 \\
+Fuerza bruta & multi  & 5/5 & 0 & 50.8  & 91.3 \\
+Fuerza bruta & único  & 2/5 & 3 & ---   & 70.9 \\
+Normal       & multi  & 5/5 & 0 & ---   & --- \\
+Normal       & único  & 1/5 & 3 & ---   & --- \\
+\midrule
+\textbf{Total} & \textbf{multi} & \textbf{16/20} & \textbf{3} & & \\
+\textbf{Total} & \textbf{único} & \textbf{7/20}  & \textbf{11} & & \\
 \bottomrule
-\multicolumn{7}{l}{\scriptsize $n=1$ por celda. TTD solo observable en la condición
-multiagente.} \\
+\multicolumn{6}{l}{\scriptsize TTD observable solo en la condición multiagente. MTTR
+promediado} \\
+\multicolumn{6}{l}{\scriptsize sobre las corridas con mitigación medible.} \\
 \end{tabular}
 \label{tab:resultados}
 \end{center}
 \end{table}
 
 \subsection{Fiabilidad de la ejecución}
-La comparación entre las acciones declaradas por el agente de Mitigación y las
-registradas en la bitácora de auditoría reveló discrepancias en dos de las ocho
-corridas. En fuerza bruta multiagente el agente declaró haber bloqueado una
-dirección IP que nunca fue bloqueada, y el servicio permaneció degradado al final de
-la corrida; es la única celda de la Tabla~\ref{tab:resultados} sin mitigación
-efectiva. En la falla multiagente el agente declaró dos reinicios mientras que la
-bitácora registró tres. Ninguna corrida bloqueó la dirección del tráfico legítimo ni
-una dirección protegida.
+La comparación entre las acciones declaradas por el sistema y las registradas en la
+bitácora de auditoría reveló discrepancias en 13 de las 40 corridas (32.5\,\%). La
+forma más frecuente no fue la esperada: en 8 corridas el sistema ejecutó una o más
+acciones sobre la infraestructura sin declararlas en su salida estructurada, mientras
+que en 3 corridas declaró acciones que nunca se ejecutaron y en 2 el conjunto
+declarado difirió del ejecutado.
 
-Este resultado es relevante desde el punto de vista de ingeniería porque muestra que
-el reporte generado por el sistema no constituye evidencia de lo ocurrido: un agente
-con capacidad de ejecución puede documentar acciones que no realizó. La auditoría
-independiente de las llamadas a herramientas, incorporada como salvaguarda de
-diseño, fue la única vía por la que estas discrepancias resultaron observables, lo
-que concuerda con lo señalado en la literatura sobre agentes con acceso a
-herramientas \cite{hu2026, debenedetti2026}.
+Se registraron además cinco acciones aplicadas sobre direcciones no pertenecientes al
+origen del ataque: cuatro en la condición de agente único y una en la multiagente.
+Tres de ellas ocurrieron durante el escenario normal, en el que no había ataque
+alguno que contener, y ninguna fue declarada por el agente. Debe notarse que estas
+acciones fueron ejecutadas en corridas cuya tarea expiró sin producir salida: el
+sistema actuó sobre el cortafuegos y, sin embargo, no emitió reporte alguno.
+
+Este resultado es relevante desde el punto de vista de ingeniería porque invierte el
+supuesto habitual sobre la documentación automática: el reporte de un agente no
+constituye evidencia de lo ocurrido, ni siquiera en sentido conservador, dado que
+puede omitir acciones efectivamente aplicadas. La auditoría independiente de las
+llamadas a herramientas, incorporada como salvaguarda de diseño, fue la única vía por
+la que estas discrepancias resultaron observables, lo que concuerda con lo señalado en
+la literatura sobre agentes con acceso a herramientas \cite{hu2026, debenedetti2026}.
 
 \subsection{Amenazas a la validez}
-El tamaño de muestra es de una repetición por celda, por lo que las diferencias de
-tiempo no admiten contraste estadístico y se reportan como preliminares. Se empleó
-un único modelo y una única variante de falla. Los escenarios presentan firmas
-claramente separadas, lo que facilita la clasificación. El DDoS inyectado opera en
-capa de aplicación y no produce respuestas de error, por lo que no cubre la
-inundación de capa de transporte. Finalmente, la delegación entre agentes fue
-sustituida por un relevo externo, de modo que lo evaluado es la especialización de
-los agentes y no su autonomía de coordinación.
+El tamaño de muestra es de cinco repeticiones por celda. Los intervalos de confianza
+calculados por remuestreo resultan amplios, por lo que las diferencias de tiempo se
+reportan como preliminares y no admiten una conclusión estadística. La diferencia en
+la tasa de respuesta, en cambio, es de magnitud suficiente (90\,\% frente a 35\,\%)
+como para no atribuirse al azar.
+
+El tope de 300 s es una restricción de la plataforma de agentes y no un parámetro del
+experimento, cuyo tiempo máximo por salto fue fijado en 900 s. Dado que ese tope
+afecta de manera desigual a las dos condiciones, el desempeño del agente único
+reportado aquí debe entenderse como el de esa arquitectura bajo dicha restricción y no
+como un límite del modelo. Una réplica con un tope mayor o con un modelo de inferencia
+más rápida podría arrojar una diferencia menor.
+
+Debe declararse además una amenaza de ajuste a los escenarios. Los prompts de rol
+fueron refinados iterativamente durante el desarrollo a partir de corridas de prueba
+que emplearon los mismos tipos de escenario que la evaluación. Como medida de control,
+los prompts fueron congelados antes de la ejecución del piloto y no fueron modificados
+durante ella. Las funciones de memoria persistente, destrezas y búsqueda de sesiones
+de la plataforma no fueron utilizadas y cada tarea abrió una sesión nueva, pero no
+fueron deshabilitadas de forma explícita en los perfiles.
+
+Se empleó un único modelo local de 9B parámetros sobre un único banco de pruebas, por
+lo que los resultados no son extrapolables a otros modelos ni a despliegues reales.
+El DDoS inyectado opera en capa de aplicación y no produce respuestas de error, por lo
+que no cubre la inundación de capa de transporte, y la mitigación no contempló el
+escalamiento de réplicas. La calidad de los reportes fue evaluada mediante
+comprobaciones automáticas simples, sin una rúbrica aplicada por evaluadores humanos.
+Finalmente, la delegación entre agentes fue sustituida por un relevo externo, de modo
+que lo evaluado es la especialización de los agentes y no su autonomía de coordinación.
 
 \section{Conclusiones}
-Se implementó y se probó Hermes-SOC sobre un banco de pruebas en contenedores. La
-clasificación diferencial entre falla operativa y ataque fue correcta en las ocho
-corridas del piloto, sin falsos positivos en el escenario normal. Sin embargo, la
-especialización multiagente no redujo el tiempo de mitigación frente a un agente
-único y lo aumentó de forma apreciable en el escenario DDoS, lo que sugiere que, con
-modelos locales, el costo de cada salto de comunicación domina sobre el beneficio de
-la especialización. Asimismo, se detectaron discrepancias entre las acciones
-declaradas y las ejecutadas en dos corridas, lo que confirma la necesidad de auditar
-las llamadas a herramientas de forma independiente del reporte del agente. Como
-trabajo futuro se contempla ejecutar el piloto completo de cinco repeticiones por
-celda, incorporar un escenario ambiguo de pico legítimo de tráfico y una línea base
-de detección por reglas sin modelo de lenguaje.
+Se implementó y se evaluó Hermes-SOC sobre un banco de pruebas en contenedores
+mediante un piloto de 40 corridas. El resultado principal no fue el previsto. La
+clasificación diferencial entre falla operativa y ataque demostró ser alcanzable con
+un modelo local de 9B parámetros: cuando el sistema respondió, acertó en el 89\,\% de
+los casos en la condición multiagente y en el 100\,\% en la de agente único, sin
+falsas alarmas en el escenario de operación normal. No obstante, el agente único
+respondió en apenas 7 de 20 corridas, frente a 18 de 20 de la cadena multiagente,
+porque agotó de forma sistemática el tope de tiempo de la plataforma al resolver las
+tres fases en un único contexto. En consecuencia, el aporte de la especialización
+multiagente no se manifestó como una reducción del tiempo de mitigación, sino como un
+aumento de la tasa de finalización de la tarea.
+
+Un segundo hallazgo concierne a la fiabilidad de la documentación automática. En 13 de
+las 40 corridas las acciones declaradas por el sistema no coincidieron con las
+registradas por la auditoría, y en 8 de ellas se ejecutaron acciones sobre el
+cortafuegos o sobre los servicios que el sistema nunca informó. Por consiguiente, en
+un agente con capacidad de ejecución la auditoría independiente de las llamadas a
+herramientas no constituye una salvaguarda accesoria, sino el único registro fiable de
+lo ocurrido.
+
+Como trabajo futuro se contempla replicar el experimento con un tope de tiempo mayor
+para aislar el efecto de la plataforma, incorporar un escenario ambiguo de pico
+legítimo de tráfico y una línea base de detección por reglas sin modelo de lenguaje, y
+evaluar los reportes mediante una rúbrica aplicada por evaluadores humanos.
 
 \begin{thebibliography}{00}
 \bibitem{khayat2025} M. Khayat, E. Barka, M. Adel Serhani, F. Sallabi, K. Shuaib, and H. M. Khater, ``Empowering Security Operation Center With Artificial Intelligence and Machine Learning---A Systematic Literature Review,'' \textit{IEEE Access}, vol. 13, pp. 19162--19197, 2025.
